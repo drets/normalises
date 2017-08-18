@@ -1,0 +1,13 @@
+/bower_components/
+/node_modules/
+/.pulp-cache/
+/output/
+/generated-docs/
+/.psc*
+/.purs*
+/.psa*
+/dist/index.js
+index.js
+todo
+/src/notes.json
+rest.http

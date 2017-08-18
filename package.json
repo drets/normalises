@@ -1,0 +1,27 @@
+{
+  "scripts": {
+    "build:fe": "pulp browserify -m FrontEnd --to dist/index.js",
+    "build:be": "pulp build --to index.js",
+    "build": "npm run build:fe && npm run build:be",
+    "watch:build": "pulp -w build",
+    "watch:fe": "webpack -w",
+    "start": "concurrently --kill-others \"npm run watch:build\"  \"npm run watch:fe\""
+  },
+  "name": "purescript-sterd",
+  "version": "1.0.0",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "dependencies": {
+    "body-parser": "^1.17.2",
+    "express": "^4.15.4"
+  },
+  "devDependencies": {
+    "concurrently": "^3.5.0",
+    "webpack": "^3.0.0"
+  },
+  "author": "",
+  "license": "MIT",
+  "description": ""
+}
