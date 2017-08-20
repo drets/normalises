@@ -15,14 +15,14 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Network.HTTP.Affjax as AX
-import Types (E, Note(..), Notes(Notes))
+import Types (E, Note(..))
 
 data Query a = GetNotes a
              | UpdateProperty String a
              | UpdateValue String a
              | SendNotes a
 
-type State = { records :: Maybe Notes, property :: Maybe String, value :: Maybe String }
+type State = { records :: Maybe (Array Note), property :: Maybe String, value :: Maybe String }
 
 component :: forall eff. H.Component HH.HTML Query Unit Void (Aff (ajax :: AX.AJAX, console :: CONSOLE | eff))
 component =
@@ -60,14 +60,14 @@ component =
       , HH.div_
           case state.records of
             Nothing -> [ HH.p_ [ HH.text "[]"] ]
-            Just (Notes arr) -> (\r -> HH.p_ [ HH.text (show r)  ]) <$> arr.notes
+            Just arr -> (\r -> HH.p_ [ HH.text (show r)  ]) <$> arr
       ]
 
   eval :: Query ~> H.ComponentDSL State Query Void (Aff (ajax :: AX.AJAX, console :: CONSOLE | eff))
   eval = case _ of
     GetNotes next -> do
       response <- H.liftAff $ AX.get "/api/notes"
-      case (runExcept (decodeJSON response.response) :: E Notes) of
+      case (runExcept (decodeJSON response.response) :: E (Array Note)) of
         Right notes -> H.modify (\state -> state { records = Just notes })
         Left e -> liftEff (log $ unsafeStringify e)
       pure next
@@ -81,8 +81,8 @@ component =
       state <- H.get
       if (isJust state.property && isJust state.value)
         then do
-          let record = Notes { notes: [ Note { property: fromMaybe "" state.property, value: fromMaybe "" state.value } ]}
-          _ <- H.liftAff $ AX.post_ "/api/notes" record
+          let record = Note { property: fromMaybe "" state.property, value: fromMaybe "" state.value }
+          _ <- H.liftAff $ AX.post_ "/api/note" record
           eval (GetNotes next)
         else
           pure next

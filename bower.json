@@ -17,7 +17,8 @@
     "purescript-hyper": "^0.8.0",
     "purescript-affjax": "^4.0.0",
     "purescript-express": "^0.5.2",
-    "purescript-node-process": "^5.0.0"
+    "purescript-node-process": "^5.0.0",
+    "purescript-node-sqlite3": "^0.5.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0"
