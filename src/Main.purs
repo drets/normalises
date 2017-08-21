@@ -7,16 +7,16 @@ import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
-import Control.Monad.Eff.Exception (EXCEPTION, Error, message)
+import Control.Monad.Eff.Exception (EXCEPTION, Error, error, message)
 import Data.Either (Either(..))
 import Data.Function.Uncurried (Fn3)
 import Data.Int (fromString)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (Maybe(..), fromMaybe)
 import Node.Buffer (BUFFER)
-import Node.Express.App (App, get, listenHttp, post, setProp, useExternal, useOnError)
-import Node.Express.Handler (Handler)
+import Node.Express.App (App, delete, get, listenHttp, post, setProp, useExternal, useOnError)
+import Node.Express.Handler (Handler, nextThrow)
 import Node.Express.Middleware.Static (static)
-import Node.Express.Request (getBody)
+import Node.Express.Request (getBody, getRouteParam)
 import Node.Express.Response (send, sendJson, setStatus)
 import Node.Express.Types (EXPRESS, Request, Response, ExpressM)
 import Node.FS (FS)
@@ -30,13 +30,16 @@ parseInt :: String -> Int
 parseInt str = fromMaybe 0 $ fromString str
 
 selectQuery :: String
-selectQuery = "SELECT property, value, created FROM notes;"
+selectQuery = "SELECT id, property, value, created FROM notes;"
 
 insertQuery :: String
-insertQuery = "INSERT OR REPLACE INTO notes (property, value, created) VALUES ($1, $2, datetime());"
+insertQuery = "INSERT INTO notes (property, value, created) VALUES ($1, $2, datetime());"
+
+deleteQuery :: String
+deleteQuery = "DELETE from notes where id=$1;"
 
 createQuery :: String
-createQuery = "CREATE TABLE IF NOT EXISTS notes (property varchar(20) primary key unique, value varchar(20), created datetime);"
+createQuery = "CREATE TABLE IF NOT EXISTS notes (id integer primary key, property varchar(20), value varchar(20), created datetime);"
 
 notesGetHandler :: forall e. DBConnection -> Handler (db :: DBEffects | e)
 notesGetHandler db = do
@@ -61,6 +64,16 @@ notePostHandler db = do
       _ <- liftAff $ queryDB' insertQuery [reqNotes.property, reqNotes.value]
       send "done"
 
+noteDeleteHandler :: forall e. DBConnection -> Handler (db :: DBEffects | e)
+noteDeleteHandler db = do
+  let queryDB' query params = queryDB db query params
+  idParam <- getRouteParam "id"
+  case idParam of
+    Nothing -> nextThrow $ error "id is required"
+    Just id -> do
+      res <- liftAff $ queryDB' deleteQuery [id]
+      send "done"
+
 errorHandler :: forall e. Error -> Handler e
 errorHandler err = do
   setStatus 400
@@ -76,10 +89,11 @@ appSetup db = do
   useExternal jsonBodyParser
   liftEff $ log "Setting up"
   setProp "json spaces" 4.0
-  get "/api/notes"  (notesGetHandler db)
-  post "/api/note"  (notePostHandler db)
-  get "*"           mainPageHandler
-  useOnError        errorHandler
+  get "/api/notes"       (notesGetHandler db)
+  post "/api/note"       (notePostHandler db)
+  delete "/api/note/:id" (noteDeleteHandler db)
+  get "*"                mainPageHandler
+  useOnError             errorHandler
 
 ensureDB :: forall eff. FilePath -> Aff (db :: DBEffects | eff) DBConnection
 ensureDB path = do

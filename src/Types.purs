@@ -21,6 +21,7 @@ type E a = Either MultipleErrors a
 newtype Note = Note
   { property :: String
   , value :: String
+  , id :: Int
   }
 
 instance myNoteShow :: Show Note where

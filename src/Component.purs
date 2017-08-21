@@ -10,6 +10,7 @@ import Data.Either (Either(..))
 import Data.Foreign.Generic (decodeJSON)
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
 import Global.Unsafe (unsafeStringify)
+import Halogen (ClassName(..))
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
@@ -21,6 +22,7 @@ data Query a = GetNotes a
              | UpdateProperty String a
              | UpdateValue String a
              | SendNotes a
+             | DeleteNote Int a
 
 type State = { records :: Maybe (Array Note), property :: Maybe String, value :: Maybe String }
 
@@ -44,23 +46,31 @@ component =
     HH.div_
       [ HH.h1_
           [ HH.text "Notes:" ]
-      , HH.input
-          [ HP.type_ HP.InputText
-          , HP.placeholder "Property"
-          , HE.onValueChange (HE.input UpdateProperty)
-          ]
-      , HH.input
-          [ HP.type_ HP.InputText
-          , HP.placeholder "Value"
-          , HE.onValueChange (HE.input UpdateValue)
-          ]
-      , HH.button
-          [ HE.onClick (HE.input_ SendNotes) ]
-          [ HH.text "Update"]
+      , HH.div [ HP.class_ (ClassName "header") ]
+        [ HH.input
+            [ HP.type_ HP.InputText
+            , HP.placeholder "Property"
+            , HE.onValueChange (HE.input UpdateProperty)
+            ]
+        , HH.input
+            [ HP.type_ HP.InputText
+            , HP.placeholder "Value"
+            , HE.onValueChange (HE.input UpdateValue)
+            ]
+        , HH.button
+            [ HE.onClick (HE.input_ SendNotes) ]
+            [ HH.text "Update"]
+            ]
       , HH.div_
           case state.records of
             Nothing -> [ HH.p_ [ HH.text "[]"] ]
-            Just arr -> (\r -> HH.p_ [ HH.text (show r)  ]) <$> arr
+            Just arr -> (\(Note r) ->
+                          HH.div [ HP.class_ (ClassName "note") ]
+                                 [ HH.p_ [ HH.text r.property ],
+                                   HH.p_ [ HH.text r.value ],
+                                   HH.button
+                                     [ HE.onClick (HE.input_ (DeleteNote r.id))]
+                                     [ HH.text "Delete"]]) <$> arr
       ]
 
   eval :: Query ~> H.ComponentDSL State Query Void (Aff (ajax :: AX.AJAX, console :: CONSOLE | eff))
@@ -77,11 +87,15 @@ component =
     UpdateValue value next -> do
       H.modify (\state -> state { value = Just value })
       pure next
+    DeleteNote id next -> do
+      _ <- H.liftAff $ AX.delete_ ("/api/note/" <> (show id))
+      eval (GetNotes next)
     SendNotes next -> do
       state <- H.get
       if (isJust state.property && isJust state.value)
         then do
-          let record = Note { property: fromMaybe "" state.property, value: fromMaybe "" state.value }
+          -- small hack with 0 − it's ignored on server.
+          let record = Note { property: fromMaybe "" state.property, value: fromMaybe "" state.value, id: 0 }
           _ <- H.liftAff $ AX.post_ "/api/note" record
           eval (GetNotes next)
         else
