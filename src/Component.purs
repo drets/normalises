@@ -6,6 +6,7 @@ import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Except (runExcept)
+import Data.Array (reverse)
 import Data.Either (Either(..))
 import Data.Foreign.Generic (decodeJSON)
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
@@ -70,7 +71,7 @@ component =
                                    HH.p_ [ HH.text r.value ],
                                    HH.button
                                      [ HE.onClick (HE.input_ (DeleteNote r.id))]
-                                     [ HH.text "Delete"]]) <$> arr
+                                     [ HH.text "Delete"]]) <$> (reverse arr)
       ]
 
   eval :: Query ~> H.ComponentDSL State Query Void (Aff (ajax :: AX.AJAX, console :: CONSOLE | eff))

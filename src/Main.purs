@@ -2,7 +2,7 @@ module Main where
 
 import Prelude
 
-import Control.Monad.Aff (Aff, Canceler, launchAff)
+import Control.Monad.Aff (Canceler, launchAff)
 import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
@@ -12,6 +12,8 @@ import Data.Either (Either(..))
 import Data.Function.Uncurried (Fn3)
 import Data.Int (fromString)
 import Data.Maybe (Maybe(..), fromMaybe)
+import Database.Postgres (Client, DB, Query(..), connect, execute, query_)
+import Database.Postgres.SqlValue (toSql)
 import Node.Buffer (BUFFER)
 import Node.Express.App (App, delete, get, listenHttp, post, setProp, useExternal, useOnError)
 import Node.Express.Handler (Handler, nextThrow)
@@ -21,7 +23,6 @@ import Node.Express.Response (send, sendJson, setStatus)
 import Node.Express.Types (EXPRESS, Request, Response, ExpressM)
 import Node.FS (FS)
 import Node.Process (PROCESS, lookupEnv)
-import SQLite3 (DBConnection, DBEffects, FilePath, newDB, queryDB)
 import Types (Note(..), E)
 
 foreign import jsonBodyParser :: forall e. Fn3 Request Response (ExpressM e Unit) (ExpressM e Unit)
@@ -33,18 +34,14 @@ selectQuery :: String
 selectQuery = "SELECT id, property, value, created FROM notes;"
 
 insertQuery :: String
-insertQuery = "INSERT INTO notes (property, value, created) VALUES ($1, $2, datetime());"
+insertQuery = "INSERT INTO notes (property, value, created) VALUES ($1, $2, current_timestamp);"
 
 deleteQuery :: String
 deleteQuery = "DELETE from notes where id=$1;"
 
-createQuery :: String
-createQuery = "CREATE TABLE IF NOT EXISTS notes (id integer primary key, property varchar(20), value varchar(20), created datetime);"
-
-notesGetHandler :: forall e. DBConnection -> Handler (db :: DBEffects | e)
-notesGetHandler db = do
-  let queryDB' query params = queryDB db query params
-  rows <- liftAff $ queryDB' selectQuery []
+notesGetHandler :: forall e. Client -> Handler (db :: DB | e)
+notesGetHandler client = do
+  rows <- liftAff $ query_ (Query selectQuery :: Query Note) client
   sendJson rows
 
 mainPageHandler :: forall e. Handler (
@@ -54,52 +51,44 @@ mainPageHandler :: forall e. Handler (
 mainPageHandler = do
   static "dist"
 
-notePostHandler :: forall e. DBConnection -> Handler (db :: DBEffects | e)
-notePostHandler db = do
-  let queryDB' query params = queryDB db query params
+notePostHandler :: forall e. Client -> Handler (db :: DB | e)
+notePostHandler client = do
   body <- getBody
   case (body :: E Note) of
     Left reqError  -> send reqError
     Right (Note reqNotes) -> do
-      _ <- liftAff $ queryDB' insertQuery [reqNotes.property, reqNotes.value]
+      _ <- liftAff $ execute (Query insertQuery) [toSql reqNotes.property, toSql reqNotes.value] client
       send "done"
 
-noteDeleteHandler :: forall e. DBConnection -> Handler (db :: DBEffects | e)
-noteDeleteHandler db = do
-  let queryDB' query params = queryDB db query params
+noteDeleteHandler :: forall e. Client -> Handler (db :: DB | e)
+noteDeleteHandler client = do
   idParam <- getRouteParam "id"
   case idParam of
     Nothing -> nextThrow $ error "id is required"
     Just id -> do
-      res <- liftAff $ queryDB' deleteQuery [id]
+      _ <- liftAff $ execute (Query deleteQuery) [toSql id] client
       send "done"
 
 errorHandler :: forall e. Error -> Handler e
 errorHandler err = do
   setStatus 400
-  sendJson { error: message err }
+  sendJson { erfror: message err }
 
-appSetup :: forall e. DBConnection -> App (
+appSetup :: forall e. Client -> App (
   fs :: FS,
   exception :: EXCEPTION,
   buffer :: BUFFER,
-  db :: DBEffects,
+  db :: DB,
   console :: CONSOLE | e)
-appSetup db = do
+appSetup client = do
   useExternal jsonBodyParser
   liftEff $ log "Setting up"
   setProp "json spaces" 4.0
-  get "/api/notes"       (notesGetHandler db)
-  post "/api/note"       (notePostHandler db)
-  delete "/api/note/:id" (noteDeleteHandler db)
+  get "/api/notes"       (notesGetHandler client)
+  post "/api/note"       (notePostHandler client)
+  delete "/api/note/:id" (noteDeleteHandler client)
   get "*"                mainPageHandler
   useOnError             errorHandler
-
-ensureDB :: forall eff. FilePath -> Aff (db :: DBEffects | eff) DBConnection
-ensureDB path = do
-  db <- newDB path
-  _ <- queryDB db createQuery []
-  pure db
 
 type AppEffects eff =
   ( fs :: FS
@@ -107,14 +96,23 @@ type AppEffects eff =
   ,  buffer :: BUFFER
   ,  express :: EXPRESS
   ,  process :: PROCESS
-  ,  db :: DBEffects
+  ,  db :: DB
   ,  console :: CONSOLE
   | eff )
+
+connectionInfo :: { host :: String, db :: String, port :: Int, user :: String, password :: String }
+connectionInfo =
+  { host: "localhost"
+  , db: "test"
+  , port: 5432
+  , user: "testuser"
+  , password: "test"
+  }
 
 main :: forall eff. Eff (AppEffects (exception :: EXCEPTION | eff))
    (Canceler (AppEffects eff))
 main = launchAff $ do
-  db <- (ensureDB "notes")
+  client <- connect connectionInfo
   port <- liftEff $ (parseInt <<< fromMaybe "8080") <$> lookupEnv "PORT"
-  liftEff $ listenHttp (appSetup db) 8080 \_ ->
+  liftEff $ listenHttp (appSetup client) 8080 \_ ->
     log $ "Listening on " <> show 8080
