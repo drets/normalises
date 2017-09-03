@@ -39,6 +39,9 @@ insertQuery = "INSERT INTO notes (property, value, created) VALUES ($1, $2, curr
 deleteQuery :: String
 deleteQuery = "DELETE from notes where id=$1;"
 
+updateQuery :: String
+updateQuery = "UPDATE notes SET property=$1, value=$2 WHERE id=$3;"
+
 notesGetHandler :: forall e. Client -> Handler (db :: DB | e)
 notesGetHandler client = do
   rows <- liftAff $ query_ (Query selectQuery :: Query Note) client
@@ -51,8 +54,8 @@ mainPageHandler :: forall e. Handler (
 mainPageHandler = do
   static "dist"
 
-notePostHandler :: forall e. Client -> Handler (db :: DB | e)
-notePostHandler client = do
+noteCreateHandler :: forall e. Client -> Handler (db :: DB | e)
+noteCreateHandler client = do
   body <- getBody
   case (body :: E Note) of
     Left reqError  -> send reqError
@@ -68,6 +71,19 @@ noteDeleteHandler client = do
     Just id -> do
       _ <- liftAff $ execute (Query deleteQuery) [toSql id] client
       send "done"
+
+noteUpdateHandler :: forall e. Client -> Handler (db :: DB | e)
+noteUpdateHandler client = do
+  idParam <- getRouteParam "id"
+  case idParam of
+    Nothing -> nextThrow $ error "id is required"
+    Just id -> do
+      body <- getBody
+      case (body :: E Note) of
+        Left reqError  -> send reqError
+        Right (Note reqNotes) -> do
+          _ <- liftAff $ execute (Query updateQuery) [toSql reqNotes.property, toSql reqNotes.value, toSql idParam] client
+          send "done"
 
 errorHandler :: forall e. Error -> Handler e
 errorHandler err = do
@@ -85,19 +101,20 @@ appSetup client = do
   liftEff $ log "Setting up"
   setProp "json spaces" 4.0
   get "/api/notes"       (notesGetHandler client)
-  post "/api/note"       (notePostHandler client)
+  post "/api/note"       (noteCreateHandler client)
   delete "/api/note/:id" (noteDeleteHandler client)
+  post "/api/note/:id"   (noteUpdateHandler client)
   get "*"                mainPageHandler
   useOnError             errorHandler
 
 type AppEffects eff =
   ( fs :: FS
-  ,  exception :: EXCEPTION
-  ,  buffer :: BUFFER
-  ,  express :: EXPRESS
-  ,  process :: PROCESS
-  ,  db :: DB
-  ,  console :: CONSOLE
+  , exception :: EXCEPTION
+  , buffer :: BUFFER
+  , express :: EXPRESS
+  , process :: PROCESS
+  , db :: DB
+  , console :: CONSOLE
   | eff )
 
 connectionInfo :: { host :: String, db :: String, port :: Int, user :: String, password :: String }

@@ -6,10 +6,12 @@ import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Except (runExcept)
-import Data.Array (reverse)
+import Data.Array (filter, index, length, range, reverse, zip)
 import Data.Either (Either(..))
 import Data.Foreign.Generic (decodeJSON)
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
+import Data.Tuple (Tuple(..))
+import EditField as EditField
 import Global.Unsafe (unsafeStringify)
 import Halogen (ClassName(..))
 import Halogen as H
@@ -24,12 +26,29 @@ data Query a = GetNotes a
              | UpdateValue String a
              | SendNotes a
              | DeleteNote Int a
+             | HandlePropertyEdit EditField.Message a
+             | HandleValueEdit EditField.Message a
 
-type State = { records :: Maybe (Array Note), property :: Maybe String, value :: Maybe String }
+type State = {
+  records  :: Maybe (Array Note),
+  property :: Maybe String,
+  value    :: Maybe String
+}
 
-component :: forall eff. H.Component HH.HTML Query Unit Void (Aff (ajax :: AX.AJAX, console :: CONSOLE | eff))
+newtype Slot = EditFieldSlot Int
+
+derive newtype instance eqSlot :: Eq Slot
+derive newtype instance ordSlot :: Ord Slot
+
+type AppEffects eff =
+  Aff
+  ( ajax :: AX.AJAX
+  , console :: CONSOLE
+  | eff )
+
+component :: forall eff. H.Component HH.HTML Query Unit Void (AppEffects eff)
 component =
-  H.lifecycleComponent
+  H.lifecycleParentComponent
     { initialState: const initialState
     , render
     , eval
@@ -40,9 +59,13 @@ component =
   where
 
   initialState :: State
-  initialState = { records: Nothing, property: Nothing, value: Nothing }
+  initialState = {
+    records: Nothing,
+    property: Nothing,
+    value: Nothing
+  }
 
-  render :: State -> H.ComponentHTML Query
+  render :: State -> H.ParentHTML Query EditField.Query Slot (AppEffects eff)
   render state =
     HH.div_
       [ HH.h1_
@@ -65,16 +88,36 @@ component =
       , HH.div_
           case state.records of
             Nothing -> [ HH.p_ [ HH.text "[]"] ]
-            Just arr -> (\(Note r) ->
-                          HH.div [ HP.class_ (ClassName "note") ]
-                                 [ HH.p_ [ HH.text r.property ],
-                                   HH.p_ [ HH.text r.value ],
-                                   HH.button
-                                     [ HE.onClick (HE.input_ (DeleteNote r.id))]
-                                     [ HH.text "Delete"]]) <$> (reverse arr)
+            Just arr -> showRow <$> zip (reverse arr) (range 1 (length arr))
+
       ]
 
-  eval :: Query ~> H.ComponentDSL State Query Void (Aff (ajax :: AX.AJAX, console :: CONSOLE | eff))
+  showRow (Tuple note@(Note n) i) = HH.div
+                   [ HP.class_ (ClassName "note") ]
+                   -- small hacks: need some unique ids; had to pass editing equals false.
+                   [ HH.slot (EditFieldSlot i)
+                             EditField.component
+                             { value: n.property, id: n.id, editing: false }
+                             (HE.input HandlePropertyEdit)
+                   , HH.slot (EditFieldSlot (-i))
+                             EditField.component
+                             { value: n.value, id: n.id, editing: false }
+                             (HE.input HandleValueEdit)
+                   , (deleteButton note)
+                   ]
+
+  deleteButton (Note note) = HH.button
+                               [ HE.onClick (HE.input_ (DeleteNote note.id))]
+                               [ HH.text "Delete"]
+
+  findNote :: Maybe (Array Note) -> Int -> Maybe Note
+  findNote Nothing _    = Nothing
+  findNote (Just xs) id = index filtered 0
+    where
+      filtered :: Array Note
+      filtered = filter (\(Note note) -> note.id == id) xs
+
+  eval :: Query ~> H.ParentDSL State Query EditField.Query Slot Void (AppEffects eff)
   eval = case _ of
     GetNotes next -> do
       response <- H.liftAff $ AX.get "/api/notes"
@@ -82,15 +125,19 @@ component =
         Right notes -> H.modify (\state -> state { records = Just notes })
         Left e -> liftEff (log $ unsafeStringify e)
       pure next
+
     UpdateProperty property next -> do
       H.modify (\state -> state { property = Just property })
       pure next
+
     UpdateValue value next -> do
       H.modify (\state -> state { value = Just value })
       pure next
+
     DeleteNote id next -> do
       _ <- H.liftAff $ AX.delete_ ("/api/note/" <> (show id))
       eval (GetNotes next)
+
     SendNotes next -> do
       state <- H.get
       if (isJust state.property && isJust state.value)
@@ -101,3 +148,22 @@ component =
           eval (GetNotes next)
         else
           pure next
+
+    HandleValueEdit (EditField.Saved editState) next -> do
+      state <- H.get
+      case findNote state.records editState.id of
+        Just (Note sRecord) -> do
+          let record = Note { property: sRecord.property, value: editState.value, id: editState.id }
+          _ <- H.liftAff $ AX.post_ ("/api/note/" <> (show editState.id)) record
+          eval (GetNotes next)
+        Nothing -> pure next
+
+    HandlePropertyEdit (EditField.Saved editState) next -> do
+      -- code duplication
+      state <- H.get
+      case findNote state.records editState.id of
+        Just (Note sRecord) -> do
+          let record = Note { property: editState.value, value: sRecord.value, id: editState.id }
+          _ <- H.liftAff $ AX.post_ ("/api/note/" <> (show editState.id)) record
+          eval (GetNotes next)
+        Nothing -> pure next
