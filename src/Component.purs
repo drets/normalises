@@ -6,11 +6,11 @@ import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Except (runExcept)
-import Data.Array (filter, index, length, range, reverse, zip)
+import DOM (DOM)
+import Data.Array (filter, index, sortWith)
 import Data.Either (Either(..))
 import Data.Foreign.Generic (decodeJSON)
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
-import Data.Tuple (Tuple(..))
 import EditField as EditField
 import Global.Unsafe (unsafeStringify)
 import Halogen (ClassName(..))
@@ -44,6 +44,7 @@ type AppEffects eff =
   Aff
   ( ajax :: AX.AJAX
   , console :: CONSOLE
+  , dom :: DOM
   | eff )
 
 component :: forall eff. H.Component HH.HTML Query Unit Void (AppEffects eff)
@@ -88,18 +89,18 @@ component =
       , HH.div_
           case state.records of
             Nothing -> [ HH.p_ [ HH.text "[]"] ]
-            Just arr -> showRow <$> zip (reverse arr) (range 1 (length arr))
+            Just arr -> showRow <$> sortWith (\(Note n) -> n.id) arr
 
       ]
 
-  showRow (Tuple note@(Note n) i) = HH.div
+  showRow note@(Note n) = HH.div
                    [ HP.class_ (ClassName "note") ]
                    -- small hacks: need some unique ids; had to pass editing equals false.
-                   [ HH.slot (EditFieldSlot i)
+                   [ HH.slot (EditFieldSlot n.id)
                              EditField.component
                              { value: n.property, id: n.id, editing: false }
                              (HE.input HandlePropertyEdit)
-                   , HH.slot (EditFieldSlot (-i))
+                   , HH.slot (EditFieldSlot (-n.id))
                              EditField.component
                              { value: n.value, id: n.id, editing: false }
                              (HE.input HandleValueEdit)
