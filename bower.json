@@ -15,7 +15,8 @@
     "purescript-affjax": "^4.0.0",
     "purescript-express": "^0.5.2",
     "purescript-node-process": "^5.0.0",
-    "purescript-node-postgres": "master"
+    "purescript-node-postgres": "master",
+    "purescript-halogen-css": "^6.0.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0"
